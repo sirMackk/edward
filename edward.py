@@ -15,9 +15,10 @@ import re
 #Forum traversial not implemented yet, lots of debugging prompts.
 
 class PostScanner(object):
-#SCRAPING SCRIPT START
     global debug
-    debug = False
+
+    def __init__(self, u):
+        self.url = u
 
     def check_date(self, s):
         """
@@ -25,7 +26,7 @@ class PostScanner(object):
         It is important, because dates are used as delimiters between posts, although
         this may be forum specific.
         """
-        if re.search(r'\d{4}-\d{2}-\d{2}', s) or 'godziny temu' in s or 'minuty temu' in s:
+        if re.search(r'\d{4}-\d{2}-\d{2}', s) or 'godziny temu' in s or 'minuty temu' in s or 'wczoraj,' in s:
             return True
         else:
             return False
@@ -50,13 +51,11 @@ class PostScanner(object):
         links = iter(page.xpath('//table[@class="attachment"]//a[@class="tooltip"]/attribute::href'))
         combined = []
         for i in pics:
-            print 'i'
-            img_tup = (i, requests.get(links.next()))
+            print 'i',
+            img_tup = (i, requests.get('%s%s' % (self.url, links.next())))
             combined.append(img_tup)
 
         return iter(combined)
-
-
 
     def make_post_list(self, posts, page):
         """
@@ -72,13 +71,15 @@ class PostScanner(object):
 
         web_images = self.get_page_images(page)
 
-
-
         def end(di, cont, final, images):
             """
             This hack is supposed to 'cap' posts and thread.
             """
+
+            #di is the dictionary
+            #cont is short for content
             di['post'] = ''.join(cont)
+
             cont[:] = []
             di['images'] = images[:]
             final.append(di)
@@ -91,23 +92,16 @@ class PostScanner(object):
             is_date = self.check_date(posts[i])
             if is_date and not final and not di:            
                 di['date'] = posts[i]
-
             elif self.check_img(posts[i]):
-                # images.append(posts[i])
                 images.append(web_images.next())
-
             elif not is_date:
                 cont.append(posts[i])
-
             else: 
-
                 di, cont, final, images = end(di, cont, final, images)
                 di['date'] = posts[i]
             i += 1
         end(di, cont, final, images)
-        print final
         return final
-
 
     def scan(self, page):
         """
@@ -118,68 +112,90 @@ class PostScanner(object):
         represents a single post.
         """
 
-
         tree = html.fromstring(page)
         content = tree.xpath('//div[@class="tresc"]//text()')
-        if debug:
-            print len(content)
-            print content
+
         filtered_list = []
         bad = ['Dodany: ', 'Cytuj+', '|', 'Link', u'Zg\u0142o\u015b', 'Cytuj']
 
-        # for i in content:
-        #     if not re.search(r'^\s[\r\n\t\t]', i) and i not in bad:
-        #         filtered_list.append(i)
         filtered_list = [i for i in content if not re.search(r'^\s[\r\n\t\t]', i) and i not in bad]
-        if debug:
-            print 'filtered list:'
-            print len(filtered_list)
-            print filtered_list
-
 
         page_of_posts = self.make_post_list(filtered_list, tree)
 
-        authors = tree.xpath('//div[@class="nickdiv"]/a/text()')
-        authors = [i.strip() for i in authors]
-        if debug:
-            print len(authors)
-            print 'authors: ', authors
+        authors = tree.xpath('//div[@class="nickdiv"]/a/text() | //div[@class="nickdiv"]/text()')
+        authors = filter(None, [i.strip() for i in authors])
 
         iter_authors = iter(authors)
         for i in page_of_posts:
             i['author'] = iter_authors.next()
 
-
-
-        if debug:
-            print 'page of posts:'
-            print page_of_posts
-            print len(page_of_posts)
-
         return page_of_posts
 
+def get_topics(topic_tree):
+    """
+    This function is responsible for scraping a topics page. It returns a list
+    of tuples in the format of (links, number of posts, titles).
+    """
+    topic_links = topic_tree.xpath('//tr[@class="transp"]/td[1]/a/attribute::href | //tr[@class=" z_tlem"]/td[1]/a/attribute::href')
+    posts_per_topic = topic_tree.xpath('//tr[@class="transp"]/td[2]/text() | //tr[@class=" z_tlem"]/td[2]/text()')
+    topic_titles = topic_tree.xpath('//tr[@class="transp"]/td[1]/a/text() | //tr[@class=" z_tlem"]/td[1]/a/text()')
+    return zip(topic_links, posts_per_topic, topic_titles)
+
+def post_scraper(url, t_info):   
+    """
+    This function obtains a list of tuples, each containing the link to a topic
+    and a number of posts. It uses PostScanner.scan() to scan each page and,
+    for now, stores it in a variable called scraped.
+    """    
+    for link, posts, title in t_info:
+
+        post_limiter = (int(posts)/10+2)
+        for k in range(1, post_limiter):
+
+            p_page = requests.get('%s%s/%d' % (url, link, k))
+            scraped = scraper.scan(p_page.text)
+            print scraped
+
 if __name__ == '__main__':
-    #Temporary testing mechanism.
+    from secret_url import secret_url
+    url = secret_url.url
+
+    page = requests.get(url)
+    tree = html.fromstring(page.text)
+    links = tree.xpath('//table[@id="serwis"]//div[@class="fl"]/a/attribute::href')
+    headers = tree.xpath('//table[@id="serwis"]//div[@class="fl"]/a/text()')
+
+    forums = zip(links, headers)
+
+    scraper = PostScanner(url)
+
+    #CREATE DATABASE SCHEMA AND APPLY TO SCRIPT
+
+    for i in xrange(1, 3):
+
+        page = requests.get('%s%s' % (url, forums[i][0]))
+        print '%s' % forums[i][1].encode('latin-1')
+
+        topic_tree = html.fromstring(page.text)
+
+        number_of_pages = topic_tree.xpath('//div[@class="paging"]/div[@class="wrap"]/em/text()')
+
+        if number_of_pages:
+            number_of_pages = int(number_of_pages[0][-3:-1])
+            number_of_pages += 1
+            for j in xrange(1, number_of_pages):
+
+                topic_page = requests.get('%s%s/%d' % (url, forums[i][0], j))
+                topics_per_page = html.fromstring(topic_page.text)
+                topic_info = get_topics(topics_per_page)
+
+                post_scraper(url, topic_info)
 
 
-    usr_input = raw_input('Select the file to scrape: ')
-    try:
-        f = open(usr_input, 'rb')
-    except IOError:
-        print 'couldnt open file'
-    else:
-        print 'file open successfully'
-        scraper = PostScanner()
-        scraped = scraper.scan(f.read())
-        for i in scraped:
-            print i['author']
-            print i['date']
-            print i['post'].encode('utf-8')
-            if 'images' in i:
-                print i['images']
+        else:
+            topic_page = requests.get('%s%s' % (url, forums[i][0]))
+            topics_per_page = html.fromstring(topic_page.text)
+            topic_info = get_topics(topics_per_page)
 
-    finally:
-        
-        f.close()
-        print 'file closed'
+            post_scraper(url, topic_info)
 
