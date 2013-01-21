@@ -1,6 +1,8 @@
 from lxml import html
 import requests
 import re
+import sqlite3
+from sys import exit
 
 #Edward,
 #Will scour a specific forum and extract posts along with date, author, content
@@ -26,7 +28,7 @@ class PostScanner(object):
         It is important, because dates are used as delimiters between posts, although
         this may be forum specific.
         """
-        if re.search(r'\d{4}-\d{2}-\d{2}', s) or 'godziny temu' in s or 'minuty temu' in s or 'wczoraj,' in s:
+        if re.search(r'\d{4}-\d{2}-\d{2},', s) or re.search(r'godzin. temu|minut. temu', s) or re.search(r'wczoraj, \d{2}:\d{2}', s):
             return True
         else:
             return False
@@ -52,7 +54,7 @@ class PostScanner(object):
         combined = []
         for i in pics:
             print 'i',
-            img_tup = (i, requests.get('%s%s' % (self.url, links.next())))
+            img_tup = (u'%s' % i, requests.get('%s%s' % (self.url, links.next())))
             combined.append(img_tup)
 
         return iter(combined)
@@ -60,7 +62,8 @@ class PostScanner(object):
     def make_post_list(self, posts, page):
         """
         This function takes in dirty data obtained from parsing an html file,
-        and cleans it to get the date, post, and image names.
+        and cleans it to get the date, post, and image names. Returns a 
+        dictionary.
         """
         cont = []
         final = []
@@ -78,7 +81,8 @@ class PostScanner(object):
 
             #di is the dictionary
             #cont is short for content
-            di['post'] = ''.join(cont)
+
+            di['post'] = u''.join(cont)
 
             cont[:] = []
             di['images'] = images[:]
@@ -88,17 +92,18 @@ class PostScanner(object):
             return di,cont, final, images
 
         limit = len(posts)
+        #rework this while loop for some minor content parsing
         while i < limit:
             is_date = self.check_date(posts[i])
             if is_date and not final and not di:            
-                di['date'] = posts[i]
+                di['date'] = u'%s' % posts[i]
             elif self.check_img(posts[i]):
                 images.append(web_images.next())
             elif not is_date:
                 cont.append(posts[i])
             else: 
                 di, cont, final, images = end(di, cont, final, images)
-                di['date'] = posts[i]
+                di['date'] = u'%s' % posts[i]
             i += 1
         end(di, cont, final, images)
         return final
@@ -124,10 +129,31 @@ class PostScanner(object):
 
         authors = tree.xpath('//div[@class="nickdiv"]/a/text() | //div[@class="nickdiv"]/text()')
         authors = filter(None, [i.strip() for i in authors])
-
+        print authors
+        print page_of_posts
+        print 'authors: ', len(authors)
+        print 'posts: ', len(page_of_posts)
         iter_authors = iter(authors)
-        for i in page_of_posts:
-            i['author'] = iter_authors.next()
+        try:
+            for i in page_of_posts:
+                i['author'] = unicode(iter_authors.next())
+        except:
+            conn.close()
+
+        for p in page_of_posts:
+            try:
+                #This is the place where posts are inserted into the DB
+                post_cur.execute('INSERT INTO POSTS (p_author, p_date, p_content, t_id) values (?, ?, ?, ?);', 
+                                (p['author'], p['date'], p['post'], topic_cur.lastrowid))
+                #And this is where images are inserted into the DB
+                if p['images']:
+                    for i in p['images']:
+                        img_cur.execute('INSERT INTO IMGS (i_name, image, p_id) values (?, ?, ?);', 
+                                    (i[0], sqlite3.Binary(i[1].content), post_cur.lastrowid))
+            except sqlite3.Error, e:
+                print e
+                conn.close()
+                exit(1)
 
         return page_of_posts
 
@@ -148,15 +174,38 @@ def post_scraper(url, t_info):
     for now, stores it in a variable called scraped.
     """    
     for link, posts, title in t_info:
+        try:
+            #This inserts a topic's name into the database
+            topic_cur.execute('INSERT INTO TOPICS (t_name, f_id) values (?, ?);', (title, forum_cur.lastrowid))
+        except sqlite3.Error, e:
+            print e
+            conn.close()
+            exit(1)
 
-        post_limiter = (int(posts)/10+2)
+        if int(posts) % 10 == 0:
+            post_limiter = (int(posts)/10)
+        else:
+            post_limiter = (int(posts)/10+2)
+
         for k in range(1, post_limiter):
 
             p_page = requests.get('%s%s/%d' % (url, link, k))
             scraped = scraper.scan(p_page.text)
+
             print scraped
 
+    try:
+    #experimental DB write here, tweak for performance
+        conn.commit()
+    except sqlite3.Error, e:
+        print e
+        conn.close()
+        exit(1)
+
+
 if __name__ == '__main__':
+
+
     from secret_url import secret_url
     url = secret_url.url
 
@@ -168,13 +217,39 @@ if __name__ == '__main__':
     forums = zip(links, headers)
 
     scraper = PostScanner(url)
+    db_name = raw_input('Input database name: ')
 
-    #CREATE DATABASE SCHEMA AND APPLY TO SCRIPT
+    try:
+        conn = sqlite3.connect(db_name)
+        forum_cur = conn.cursor()
+        topic_cur = conn.cursor()
+        post_cur = conn.cursor()
+        img_cur = conn.cursor()
+        forum_cur.execute('DROP TABLE IF EXISTS FORUMS;')
+        forum_cur.execute('DROP TABLE IF EXISTS TOPICS;')
+        forum_cur.execute('DROP TABLE IF EXISTS POSTS;')
+        forum_cur.execute('DROP TABLE IF EXISTS IMGS;')
+        forum_cur.execute('CREATE TABLE FORUMS (f_id integer primary key, f_name text);')
+        forum_cur.execute('CREATE TABLE TOPICS (t_id integer primary key, t_name text, f_id references FORUMS);')
+        forum_cur.execute('CREATE TABLE POSTS (p_id integer primary key, p_author text, p_date text, p_content text, t_id references TOPICS);')
+        forum_cur.execute('CREATE TABLE IMGS (i_id integer primary key, i_name text, image blob, p_id references POSTS);')
+    except sqlite3.Error, e:
+        print e
+        conn.close()
+        exit(1)
 
-    for i in xrange(1, 3):
+    conn.commit()
+
+    #set range for number of forums starting with zero and going up to 
+    #number of forums + 1
+    for i in xrange(0, 7):
 
         page = requests.get('%s%s' % (url, forums[i][0]))
-        print '%s' % forums[i][1].encode('latin-1')
+
+        print 'next topic'
+        #This an entry into the database with the title of a forum
+        forum_cur.execute('INSERT INTO FORUMS (f_name) values (?);', (unicode(forums[i][1]),))
+
 
         topic_tree = html.fromstring(page.text)
 
@@ -199,3 +274,9 @@ if __name__ == '__main__':
 
             post_scraper(url, topic_info)
 
+    print 'page scraped'
+    print 'scraped %d posts' % post_cur.lastrowid
+    print 'scraped %d topics' % topic_cur.lastrowid
+    print 'scraped %d images' % img_cur.lastrowid
+    print 'scraped %d forums' % forum_cur.lastrowid
+    conn.close()

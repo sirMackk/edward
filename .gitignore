@@ -16,6 +16,8 @@ local.properties
 .settings/
 .loadpath
 secret_url.py
+*.db
+*.d
 
 # External tool builders
 .externalToolBuilders/
