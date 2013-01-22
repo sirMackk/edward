@@ -17,7 +17,6 @@ from sys import exit
 #Forum traversial not implemented yet, lots of debugging prompts.
 
 class PostScanner(object):
-    global debug
 
     def __init__(self, u):
         self.url = u
@@ -26,9 +25,14 @@ class PostScanner(object):
         """
         This function is meant to check whether a string has a specific date format.
         It is important, because dates are used as delimiters between posts, although
-        this may be forum specific.
+        this is be forum specific.
         """
-        if re.search(r'\d{4}-\d{2}-\d{2},', s) or re.search(r'godzin. temu|minut. temu', s) or re.search(r'wczoraj, \d{2}:\d{2}', s):
+        if ((re.search(r'\d{4}-\d{2}-\d{2},', s) 
+
+            or re.search(r'godzin[y\n]? temu|minut[y\n]? temu|sekund[y\n]? temu', s) 
+            or re.search(r'wczoraj, \d{2}:\d{2}', s))
+            and not re.search(r'[\(\)bfhlp]', s)
+            ):
             return True
         else:
             return False
@@ -51,13 +55,15 @@ class PostScanner(object):
         """
         pics = page.xpath('//table[@class="attachment"]//a[@class="tooltip"]/img/attribute::alt')
         links = iter(page.xpath('//table[@class="attachment"]//a[@class="tooltip"]/attribute::href'))
+        print 'pics', pics
+        print 'links', page.xpath('//table[@class="attachment"]//a[@class="tooltip"]/attribute::href')
         combined = []
         for i in pics:
             print 'i',
             img_tup = (u'%s' % i, requests.get('%s%s' % (self.url, links.next())))
             combined.append(img_tup)
 
-        return iter(combined)
+        return iter(combined), pics
 
     def make_post_list(self, posts, page):
         """
@@ -72,7 +78,7 @@ class PostScanner(object):
 
         images = []
 
-        web_images = self.get_page_images(page)
+        web_images, pics = self.get_page_images(page)
 
         def end(di, cont, final, images):
             """
@@ -97,7 +103,7 @@ class PostScanner(object):
             is_date = self.check_date(posts[i])
             if is_date and not final and not di:            
                 di['date'] = u'%s' % posts[i]
-            elif self.check_img(posts[i]):
+            elif self.check_img(posts[i]) and posts[i] in pics:
                 images.append(web_images.next())
             elif not is_date:
                 cont.append(posts[i])
@@ -121,7 +127,8 @@ class PostScanner(object):
         content = tree.xpath('//div[@class="tresc"]//text()')
 
         filtered_list = []
-        bad = ['Dodany: ', 'Cytuj+', '|', 'Link', u'Zg\u0142o\u015b', 'Cytuj']
+        #This is extremely forum specific
+        bad = ['Dodany: ', 'Cytuj+', '|', 'Link', u'Zg\u0142o\u015b', 'Cytuj', 'Cytuj', '2006-08-04, 14:00']
 
         filtered_list = [i for i in content if not re.search(r'^\s[\r\n\t\t]', i) and i not in bad]
 
@@ -129,10 +136,29 @@ class PostScanner(object):
 
         authors = tree.xpath('//div[@class="nickdiv"]/a/text() | //div[@class="nickdiv"]/text()')
         authors = filter(None, [i.strip() for i in authors])
-        print authors
-        print page_of_posts
+
+        #This whole try-except-if block is to improve parsing posts
+        #that contain non-standard input. This is extremely forum
+        #specific.
+
+        try:
+            for i in xrange(0, len(authors)):
+                if len(authors[i]) < 3:
+                    authors[i-1] += authors[i]
+                    del authors[i]
+        except IndexError:
+            pass
+
+        print 'authors: ', authors
         print 'authors: ', len(authors)
         print 'posts: ', len(page_of_posts)
+        if len(authors) != len(page_of_posts) or len(page_of_posts) > 10:
+            print authors
+            print page_of_posts
+            print filtered_list
+            print 'author and post # mismatch'
+            exit(1)
+
         iter_authors = iter(authors)
         try:
             for i in page_of_posts:
@@ -183,13 +209,14 @@ def post_scraper(url, t_info):
             exit(1)
 
         if int(posts) % 10 == 0:
-            post_limiter = (int(posts)/10)
+            post_limiter = (int(posts)/10+1)
         else:
             post_limiter = (int(posts)/10+2)
 
         for k in range(1, post_limiter):
 
             p_page = requests.get('%s%s/%d' % (url, link, k))
+            print 'URL: ', p_page.url
             scraped = scraper.scan(p_page.text)
 
             print scraped
@@ -245,8 +272,12 @@ if __name__ == '__main__':
     for i in xrange(0, 7):
 
         page = requests.get('%s%s' % (url, forums[i][0]))
+        try:
 
-        print 'next topic'
+            print forums[i][1].encode('latin-1')
+        except UnicodeEncodeError:
+            print forums[i][1].encode('utf-8')
+
         #This an entry into the database with the title of a forum
         forum_cur.execute('INSERT INTO FORUMS (f_name) values (?);', (unicode(forums[i][1]),))
 
