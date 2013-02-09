@@ -14,7 +14,6 @@ from sys import exit
 #For the moment it's restricted to scraping a local file, because
 #testing it out in the wild might ring some ddos alarms.
 
-#Forum traversial not implemented yet, lots of debugging prompts.
 
 class PostScanner(object):
 
@@ -29,8 +28,8 @@ class PostScanner(object):
         """
         if ((re.search(r'\d{4}-\d{2}-\d{2},', s) 
 
-            or re.search(r'godzin[y\n]? temu|minut[y\n]? temu|sekund[y\n]? temu', s) 
-            or re.search(r'wczoraj, \d{2}:\d{2}', s))
+            or re.search(r'^\d{1,2} godzin[y\n]? temu|^\d{1,2} minut[y\n]? temu|^\d{1,2} sekund[y\n]? temu', s) 
+            or re.search(r'^wczoraj, \d{2}:\d{2}', s))
             and not re.search(r'[\(\)bfhlp]', s)
             ):
             return True
@@ -41,7 +40,7 @@ class PostScanner(object):
         """
         This function checks if a string is likely a name of an image.
         """
-        if re.search(r'\.jpg|\.tiff|\.gif|\.bmp|\.png', s.lower()):
+        if re.search(r'\.jpg$|\.tiff$|\.gif$|\.bmp$|\.png$', s.lower()):
             return True
         else:
             return False
