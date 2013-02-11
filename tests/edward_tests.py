@@ -48,14 +48,16 @@ class edward_get_page_images_tests(object):
         if (args[0] == '//table[@class="attachment"]//a[@class="tooltip"]/img/attribute::alt'
         or args[0] == 'img_list'):
             return img_list
-        elif args[0] == '//table[@class="attachment"]//a[@class="tooltip"]/attribute::href':
+        elif (args[0] == '//table[@class="attachment"]//a[@class="tooltip"]/attribute::href'
+            or args[0] == 'link_list'):
             return link_list
 
     def dummy_requests(self, s):
         return s
 
     def setup(self):
-        self.scanner = edward.PostScanner('http://example.com')
+        self.URL = 'http://example.com'
+        self.scanner = edward.PostScanner(self.URL)
         self.mock_page = mock.Mock()
         self.mock_page.xpath.side_effect = self.page_mock_links_imgs
         #monkeypatching the requests.get call in edward with fake function defined above
@@ -69,17 +71,27 @@ class edward_get_page_images_tests(object):
 
         assert_equal(itered_links_and_pics, self.page_mock_links_imgs('img_list'))
 
-    def test_get_page_images_iterator_good(self):
+    def test_get_page_images_iterator_good_count(self):
         #Index 0 because the function returns two vars, 0 is an iterator containing
         #tuple pairs of (image_name, relative_url)
-
-        #TODO: verify if names in tuple are in correct order as original lists
         itered_links_and_pics = self.scanner.get_page_images(self.mock_page)[0]
         list_of_tuples = [i for i in itered_links_and_pics]
         assert_equal(len(list_of_tuples), 9)
 
-        
-       
+    def test_get_page_images_iterator_good_order(self):
+        itered_links_and_pics = self.scanner.get_page_images(self.mock_page)[0]
+        list_of_tuples = [i for i in itered_links_and_pics]
+
+        link_list = ['%s%s' % (self.URL, i) for i in self.page_mock_links_imgs('link_list')]
+        img_list = self.page_mock_links_imgs('img_list')
+        print img_list
+        print list_of_tuples
+        for i in xrange(len(list_of_tuples)):
+            #check the tuple, index 0 being image file name, index 1 being the 
+            #absolute url
+            assert_equal(list_of_tuples[i][0], img_list[i])
+            assert_equal(list_of_tuples[i][1], link_list[i])
+
     def test_make_post_list(self):
         pass
 
