@@ -51,6 +51,8 @@ class edward_get_page_images_tests(object):
         elif (args[0] == '//table[@class="attachment"]//a[@class="tooltip"]/attribute::href'
             or args[0] == 'link_list'):
             return link_list
+        else:
+            raise ValueError('page_mock_links_imgs does not work with that argument')
 
     def dummy_requests(self, s):
         return s
@@ -92,13 +94,51 @@ class edward_get_page_images_tests(object):
             assert_equal(list_of_tuples[i][0], img_list[i])
             assert_equal(list_of_tuples[i][1], link_list[i])
 
+class edward_get_topics_tests(object):
+
+    def lxml_tree_mock(self, *args):
+        t_links = ['/temat/468976/polecam-nowe-forum', '/temat/465987/witam-nowych', 
+        '/temat/136645/put-no-monument', '/temat/107867/for-me-i-didnt', '/temat/5641326/it-in-life-and-i-dont',
+         '/temat/136549/need-it-in', '/temat/546974/death', '/temat/651657/if-i-no-longer-serve', '/temat/654977/you-just-kiss-my',
+          '/temat/5465798/my-ashes-goodbye']
+        t_posts = ['23', '11', '95', '75', '23', '22', '4', '24', '22', '60']
+        t_titles = [u'by the time you read this', u'i will already be dead', 
+        'by the time you read this', 'i will already', u'be gone \xc4\x99 pick up the pieces \u2019', 'pieces', 'and throw them away',
+         'do not reply to this', u'but realise what you have done\xc3\xb3w!', u'by the time you read this\xc3\xb3b ze \xc5\x9al']
+
+        if args[0] == '//tr[@class="transp"]/td[1]/a/attribute::href | //tr[@class=" z_tlem"]/td[1]/a/attribute::href':
+            return t_links
+        elif args[0] == '//tr[@class="transp"]/td[2]/text() | //tr[@class=" z_tlem"]/td[2]/text()':
+            return t_posts
+        elif args[0] == '//tr[@class="transp"]/td[1]/a/text() | //tr[@class=" z_tlem"]/td[1]/a/text()':
+            return t_titles
+        else:
+            raise ValueError('lxml_tree_mock does not work with that argument.')
+
+    def setup(self):
+        self.mock_topic_tree = mock.Mock()
+        self.mock_topic_tree.xpath.side_effect = self.lxml_tree_mock
+
+    def test_get_topics_tests_good(self):
+        zipped = [('/temat/468976/polecam-nowe-forum', '23', u'by the time you read this'),
+         ('/temat/465987/witam-nowych', '11', u'i will already be dead'),
+          ('/temat/136645/put-no-monument', '95', 'by the time you read this'), ('/temat/107867/for-me-i-didnt', '75', 'i will already'),
+           ('/temat/5641326/it-in-life-and-i-dont', '23', u'be gone \xc4\x99 pick up the pieces \u2019'),
+            ('/temat/136549/need-it-in', '22', 'pieces'), ('/temat/546974/death', '4', 'and throw them away'),
+             ('/temat/651657/if-i-no-longer-serve', '24', 'do not reply to this'),
+              ('/temat/654977/you-just-kiss-my', '22', u'but realise what you have done\xc3\xb3w!'),
+               ('/temat/5465798/my-ashes-goodbye', '60', u'by the time you read this\xc3\xb3b ze \xc5\x9al')]
+
+        result = edward.get_topics(self.mock_topic_tree)
+        assert_equal(result, zipped)
+
+    #TODO: Finish off get_topics tests and think about make_post_list_tests
+
+
     def test_make_post_list(self):
         pass
 
     def test_scan(self):
-        pass
-
-    def test_get_topics(self):
         pass
 
     def test_post_scraper(self):
